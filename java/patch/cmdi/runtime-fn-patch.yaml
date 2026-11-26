@@ -1,0 +1,84 @@
+rules:
+- id: cmdi-fn-patch-request-command-flow
+  languages:
+  - java
+  severity: ERROR
+  message: >-
+    [通用规则] HTTP 请求输入经通用集合或迭代器传播后进入
+    Runtime.exec/ProcessBuilder。仅建模显式索引、同键映射和迭代器取值语义。
+  metadata:
+    cwe:
+    - 'CWE-78: Improper Neutralization of Special Elements used in an OS Command (''OS Command Injection'')'
+    category: security
+    technology:
+    - java
+    - servlets
+    subcategory:
+    - vuln
+    confidence: MEDIUM
+    patch-for: tainted-cmd-from-http-request,command-injection-process-builder
+    patch-cause: generic collection and iterator flow
+  mode: taint
+  options:
+    interfile: true
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletRequest $REQ).$REQFUNC(...)
+      - pattern: (ServletRequest $REQ).$REQFUNC(...)
+    - metavariable-regex:
+        metavariable: $REQFUNC
+        regex: (getInputStream|getParameter|getParameterMap|getParameterValues|getParameterNames|getReader|getCookies|getHeader|getHeaderNames|getHeaders|getPart|getParts|getQueryString)
+  - patterns:
+    - pattern-inside: |
+        $TYPE[] $COOKIES = (HttpServletRequest $REQ).getCookies(...);
+        ...
+        for (javax.servlet.http.Cookie $COOKIE : $COOKIES) {
+          ...
+        }
+    - pattern: $COOKIE.getValue(...)
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-propagators:
+  - pattern: |
+      $LIST.add($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $LIST.set($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $ARRAY[$INDEX] = $VALUE;
+      $BAR = $ARRAY[$INDEX];
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $MAP.put($KEY, $VALUE);
+      ...
+      $BAR = $MAP.get($KEY);
+    from: $VALUE
+    to: $BAR
+  - pattern-either:
+    - pattern: $BAR = $ENUM.nextElement()
+    - pattern: (String $BAR) = $ENUM.nextElement()
+    from: $ENUM
+    to: $BAR
+  - pattern-either:
+    - pattern: $BAR = $ITERATOR.next()
+    - pattern: (String $BAR) = $ITERATOR.next()
+    from: $ITERATOR
+    to: $BAR
+  pattern-sinks:
+  - pattern-either:
+    - pattern: (java.lang.Runtime $RUNTIME).exec(...)
+    - pattern: (Runtime $RUNTIME).exec(...)
+    - pattern: (java.lang.ProcessBuilder $BUILDER) = ...
+    - pattern: (ProcessBuilder $BUILDER) = ...
+    - pattern: new java.lang.ProcessBuilder(...)
+    - pattern: new ProcessBuilder(...)

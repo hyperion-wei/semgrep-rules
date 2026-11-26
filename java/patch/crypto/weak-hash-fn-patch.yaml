@@ -1,0 +1,32 @@
+rules:
+- id: hash-fn-patch-configurable-algorithm
+  languages:
+  - java
+  severity: WARNING
+  message: >-
+    [通用规则] MessageDigest 的算法名来自 Properties/System 配置时，静态规则无法
+    确认运行时值是否仍为安全算法。将配置值作为污点源，避免只匹配字面量而漏掉
+    MD5、SHA-1 等弱算法配置。
+  metadata:
+    cwe:
+    - 'CWE-328: Use of a Weak Hash'
+    category: security
+    technology:
+    - java
+    - crypto
+    subcategory:
+    - audit
+    confidence: MEDIUM
+    patch-for: use-of-md5,use-of-sha1
+    patch-cause: configurable hash algorithm
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: $CONFIG.getProperty(...)
+    - pattern: System.getProperty(...)
+  pattern-sinks:
+  - pattern-either:
+    - pattern: java.security.MessageDigest.getInstance(...)
+    - pattern: MessageDigest.getInstance(...)
+    - pattern: org.apache.commons.codec.digest.DigestUtils.getDigest(...)
+    - pattern: DigestUtils.getDigest(...)

@@ -1,0 +1,106 @@
+rules:
+- id: pathtraver-fn-patch-request-file-flow
+  languages:
+  - java
+  severity: ERROR
+  message: >-
+    [通用规则] 请求参数、Cookie、Header 经通用集合或迭代器传播后进入
+    File、NIO Path 或文件流 API。覆盖 Files.newInputStream/Paths.get 等常见
+    路径入口，并保留 FilenameUtils.getName 清洗语义。
+  metadata:
+    cwe:
+    - 'CWE-22: Improper Limitation of a Pathname to a Restricted Directory (''Path Traversal'')'
+    category: security
+    technology:
+    - java
+    - servlets
+    - files
+    subcategory:
+    - vuln
+    confidence: MEDIUM
+    patch-for: httpservlet-path-traversal
+    patch-cause: generic collection iterator and nio sink coverage
+  mode: taint
+  options:
+    interfile: true
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletRequest $REQ).$REQFUNC(...)
+      - pattern: (ServletRequest $REQ).$REQFUNC(...)
+    - metavariable-regex:
+        metavariable: $REQFUNC
+        regex: (getInputStream|getParameter|getParameterMap|getParameterValues|getParameterNames|getReader|getCookies|getHeader|getHeaderNames|getHeaders|getPart|getParts|getQueryString)
+  - patterns:
+    - pattern-inside: |
+        $TYPE[] $COOKIES = (HttpServletRequest $REQ).getCookies(...);
+        ...
+        for (javax.servlet.http.Cookie $COOKIE : $COOKIES) {
+          ...
+        }
+    - pattern: $COOKIE.getValue(...)
+  - patterns:
+    - pattern-inside: |
+        $MAP = (HttpServletRequest $REQ).getParameterMap();
+        ...
+        $VALUES = $MAP.get(...);
+        ...
+        $PARAM = $VALUES[$INDEX];
+    - pattern: $PARAM
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-propagators:
+  - pattern: |
+      $LIST.add($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $LIST.set($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $ARRAY[$INDEX] = $VALUE;
+      $BAR = $ARRAY[$INDEX];
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $MAP.put($KEY, $VALUE);
+      ...
+      $BAR = $MAP.get($KEY);
+    from: $VALUE
+    to: $BAR
+  - pattern-either:
+    - pattern: $BAR = $ENUM.nextElement()
+    - pattern: (String $BAR) = $ENUM.nextElement()
+    from: $ENUM
+    to: $BAR
+  - pattern-either:
+    - pattern: $BAR = $ITERATOR.next()
+    - pattern: (String $BAR) = $ITERATOR.next()
+    from: $ITERATOR
+    to: $BAR
+  pattern-sanitizers:
+  - pattern: org.apache.commons.io.FilenameUtils.getName(...)
+  pattern-sinks:
+  - pattern-either:
+    - pattern: (java.io.File $FILE) = ...
+    - pattern: (java.io.FileInputStream $STREAM) = ...
+    - pattern: (java.io.FileOutputStream $STREAM) = ...
+    - pattern: (java.io.FileWriter $WRITER) = ...
+    - pattern: (java.io.RandomAccessFile $FILE) = ...
+    - pattern: new java.io.FileInputStream(...)
+    - pattern: new java.io.FileOutputStream(...)
+    - pattern: new java.io.FileWriter(...)
+    - pattern: new java.io.RandomAccessFile(...)
+    - pattern: java.nio.file.Paths.get(...)
+    - pattern: Paths.get(...)
+    - pattern: java.nio.file.Files.newInputStream(...)
+    - pattern: java.nio.file.Files.newOutputStream(...)
+    - pattern: java.nio.file.Files.readAllBytes(...)
+    - pattern: java.nio.file.Files.readAllLines(...)
+    - pattern: java.nio.file.Files.write(...)

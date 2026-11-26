@@ -1,0 +1,96 @@
+rules:
+- id: trustbound-fn-patch-session-key-value-flow
+  languages:
+  - java
+  severity: WARNING
+  message: >-
+    [通用规则] 请求输入进入 HttpSession.setAttribute/putValue 的 key 或
+    value 时报告信任边界违规。覆盖显式索引、同键映射和通用迭代器传播。
+  metadata:
+    cwe:
+    - 'CWE-501: Trust Boundary Violation'
+    category: security
+    technology:
+    - java
+    - servlets
+    subcategory:
+    - vuln
+    confidence: MEDIUM
+    patch-for: tainted-session-from-http-request
+    patch-cause: generic session key and collection flow
+  mode: taint
+  options:
+    interfile: true
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletRequest $REQ).$REQFUNC(...)
+      - pattern: (ServletRequest $REQ).$REQFUNC(...)
+    - metavariable-regex:
+        metavariable: $REQFUNC
+        regex: (getInputStream|getParameter|getParameterMap|getParameterValues|getParameterNames|getReader|getCookies|getHeader|getHeaderNames|getHeaders|getPart|getParts|getQueryString)
+  - patterns:
+    - pattern-inside: |
+        $TYPE[] $COOKIES = (HttpServletRequest $REQ).getCookies(...);
+        ...
+        for (javax.servlet.http.Cookie $COOKIE : $COOKIES) {
+          ...
+        }
+    - pattern-either:
+      - pattern: $COOKIE.getValue(...)
+      - pattern: $COOKIE.getName(...)
+  - patterns:
+    - pattern-inside: |
+        $MAP = (HttpServletRequest $REQ).getParameterMap();
+        ...
+        $VALUES = $MAP.get(...);
+        ...
+        $PARAM = $VALUES[$INDEX];
+    - pattern: $PARAM
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-propagators:
+  - pattern: |
+      $LIST.add($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $LIST.set($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $ARRAY[$INDEX] = $VALUE;
+      $BAR = $ARRAY[$INDEX];
+    from: $VALUE
+    to: $BAR
+  - pattern: |
+      $MAP.put($KEY, $VALUE);
+      ...
+      $BAR = $MAP.get($KEY);
+    from: $VALUE
+    to: $BAR
+  - pattern-either:
+    - pattern: $BAR = $ENUM.nextElement()
+    - pattern: (String $BAR) = $ENUM.nextElement()
+    from: $ENUM
+    to: $BAR
+  - pattern-either:
+    - pattern: $BAR = $ITERATOR.next()
+    - pattern: (String $BAR) = $ITERATOR.next()
+    from: $ITERATOR
+    to: $BAR
+  pattern-sinks:
+  - pattern-either:
+    - pattern: (javax.servlet.http.HttpSession $SESSION).setAttribute(...)
+    - pattern: (HttpSession $SESSION).setAttribute(...)
+    - pattern: (javax.servlet.http.HttpSession $SESSION).putValue(...)
+    - pattern: (HttpSession $SESSION).putValue(...)
+    - pattern: (HttpServletRequest $REQ).getSession().setAttribute(...)
+    - pattern: (HttpServletRequest $REQ).getSession().putValue(...)
+    - pattern: (javax.servlet.ServletContext $CONTEXT).setAttribute(...)
+    - pattern: (ServletContext $CONTEXT).setAttribute(...)

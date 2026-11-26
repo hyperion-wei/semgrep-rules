@@ -1,0 +1,163 @@
+rules:
+- id: xss-fn-patch-helper-param-source
+  languages:
+  - java
+  severity: WARNING
+  message: >-
+    [通用规则] 由 HttpServletRequest 构造的请求包装器方法返回值进入响应输出。
+    使用标准响应 Writer sink 和公开的 HTML 清洗 API，适用于跨文件请求封装，
+    不绑定具体类名或方法名。
+  metadata:
+    cwe:
+    - "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+    category: security
+    technology:
+    - java
+    - servlets
+    subcategory:
+    - audit
+    confidence: MEDIUM
+    patch-for: no-direct-response-writer
+    patch-cause: generic request wrapper and response sink coverage
+  mode: taint
+  options:
+    interfile: true
+  pattern-sources:
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletResponse $RESPONSE).getWriter(...).$WRITE(...)
+      - pattern: (HttpServletResponse $RESPONSE).getOutputStream(...).$WRITE(...)
+      - pattern: (java.io.PrintWriter $WRITER).$WRITE(...)
+      - pattern: (PrintWriter $WRITER).$WRITE(...)
+      - pattern: (javax.servlet.ServletOutputStream $WRITER).$WRITE(...)
+      - pattern: (ServletOutputStream $WRITER).$WRITE(...)
+      - pattern: (java.io.OutputStream $WRITER).$WRITE(...)
+      - pattern: (OutputStream $WRITER).$WRITE(...)
+  pattern-sanitizers:
+  - pattern-either:
+    - pattern: Encode.forHtml(...)
+    - pattern: (PolicyFactory $POLICY).sanitize(...)
+    - pattern: (AntiSamy $AS).scan(...)
+    - pattern: JSoup.clean(...)
+    - pattern: org.apache.commons.lang.StringEscapeUtils.escapeHtml(...)
+    - pattern: org.springframework.web.util.HtmlUtils.htmlEscape(...)
+    - pattern: org.owasp.esapi.ESAPI.encoder().encodeForHTML(...)
+
+- id: xss-fn-patch-collection-enumeration-flow
+  languages:
+  - java
+  severity: WARNING
+  message: >-
+    [通用规则] 请求输入经过显式同下标 List/数组读写、Map 同键传播或
+    Iterator/Enumeration 取值后进入响应 Writer。sink 必须带有
+    ELEMENT_FLOW 标签，避免复制普通 source-to-sink 告警。
+  metadata:
+    cwe:
+    - "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+    category: security
+    technology:
+    - java
+    - servlets
+    subcategory:
+    - audit
+    confidence: MEDIUM
+    patch-for: no-direct-response-writer
+    patch-cause: generic collection and iterator flow
+  mode: taint
+  options:
+    interfile: true
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletRequest $REQ).$REQFUNC(...)
+      - pattern: (ServletRequest $REQ).$REQFUNC(...)
+    - metavariable-regex:
+        metavariable: $REQFUNC
+        regex: (getInputStream|getParameter|getParameterMap|getParameterValues|getParameterNames|getReader|getCookies|getHeader|getHeaderNames|getHeaders|getPart|getParts|getQueryString)
+  - patterns:
+    - pattern-inside: |
+        $TYPE[] $COOKIES = (HttpServletRequest $REQ).getCookies(...);
+        ...
+        for (javax.servlet.http.Cookie $COOKIE : $COOKIES) {
+          ...
+        }
+    - pattern: $COOKIE.getValue(...)
+  - patterns:
+    - pattern-inside: |
+        $MAP = (HttpServletRequest $REQ).getParameterMap();
+        ...
+        $VALUES = $MAP.get(...);
+        ...
+        $PARAM = $VALUES[$INDEX];
+    - pattern: $PARAM
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-propagators:
+  # 仅对显式同下标或同键的读写建立传播边，不污染整个集合。
+  - pattern: |
+      $LIST.add($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+    label: ELEMENT_FLOW
+  - pattern: |
+      $LIST.set($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+    label: ELEMENT_FLOW
+  - pattern: |
+      $ARRAY[$INDEX] = $VALUE;
+      $BAR = $ARRAY[$INDEX];
+    from: $VALUE
+    to: $BAR
+    label: ELEMENT_FLOW
+  - pattern: |
+      $MAP.put($KEY, $VALUE);
+      ...
+      $BAR = $MAP.get($KEY);
+    from: $VALUE
+    to: $BAR
+    label: ELEMENT_FLOW
+  - pattern-either:
+    - pattern: $BAR = $ENUM.nextElement()
+    - pattern: (String $BAR) = $ENUM.nextElement()
+    from: $ENUM
+    to: $BAR
+    label: ELEMENT_FLOW
+  - pattern-either:
+    - pattern: $BAR = $ITERATOR.next()
+    - pattern: (String $BAR) = $ITERATOR.next()
+    from: $ITERATOR
+    to: $BAR
+    label: ELEMENT_FLOW
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletResponse $RESPONSE).getWriter(...).$WRITE(...)
+      - pattern: (HttpServletResponse $RESPONSE).getOutputStream(...).$WRITE(...)
+      - pattern: (java.io.PrintWriter $WRITER).$WRITE(...)
+      - pattern: (PrintWriter $WRITER).$WRITE(...)
+      - pattern: (javax.servlet.ServletOutputStream $WRITER).$WRITE(...)
+      - pattern: (ServletOutputStream $WRITER).$WRITE(...)
+      - pattern: (java.io.OutputStream $WRITER).$WRITE(...)
+      - pattern: (OutputStream $WRITER).$WRITE(...)
+    requires: ELEMENT_FLOW
+  pattern-sanitizers:
+  - pattern-either:
+    - pattern: Encode.forHtml(...)
+    - pattern: (PolicyFactory $POLICY).sanitize(...)
+    - pattern: (AntiSamy $AS).scan(...)
+    - pattern: JSoup.clean(...)
+    - pattern: org.apache.commons.lang.StringEscapeUtils.escapeHtml(...)
+    - pattern: org.springframework.web.util.HtmlUtils.htmlEscape(...)
+    - pattern: org.owasp.esapi.ESAPI.encoder().encodeForHTML(...)

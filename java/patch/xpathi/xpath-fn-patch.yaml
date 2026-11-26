@@ -1,0 +1,60 @@
+rules:
+- id: xpathi-fn-patch-helper-expression-flow
+  languages:
+  - java
+  severity: WARNING
+  message: >-
+    [通用规则] HTTP 请求参数、Cookie、Header 等不可信输入进入
+    XPath.compile/evaluate，并使用引擎的通用跨文件传播能力。
+  metadata:
+    cwe:
+    - 'CWE-643: Improper Neutralization of Data within XPath Expressions (''XPath Injection'')'
+    category: security
+    technology:
+    - java
+    - servlets
+    - xml
+    subcategory:
+    - vuln
+    confidence: MEDIUM
+    patch-for: tainted-xpath-from-http-request
+    patch-cause: generic request source and xpath sink coverage
+  mode: taint
+  options:
+    interfile: true
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletRequest $REQ).$REQFUNC(...)
+      - pattern: (ServletRequest $REQ).$REQFUNC(...)
+    - metavariable-regex:
+        metavariable: $REQFUNC
+        regex: (getInputStream|getParameter|getParameterMap|getParameterValues|getParameterNames|getReader|getCookies|getHeader|getHeaderNames|getHeaders|getPart|getParts|getQueryString)
+  - patterns:
+    - pattern-inside: |
+        $TYPE[] $COOKIES = (HttpServletRequest $REQ).getCookies(...);
+        ...
+        for (javax.servlet.http.Cookie $COOKIE : $COOKIES) {
+          ...
+        }
+    - pattern: $COOKIE.getValue(...)
+  - patterns:
+    - pattern-inside: |
+        $MAP = (HttpServletRequest $REQ).getParameterMap();
+        ...
+        $VALUES = $MAP.get(...);
+        ...
+        $PARAM = $VALUES[$INDEX];
+    - pattern: $PARAM
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-sinks:
+  - pattern-either:
+    - pattern: (javax.xml.xpath.XPath $XPATH).compile(...)
+    - pattern: (XPath $XPATH).compile(...)
+    - pattern: (javax.xml.xpath.XPath $XPATH).evaluate(...)
+    - pattern: (XPath $XPATH).evaluate(...)
+    - pattern: $XPATH.compile(...).evaluate(...)

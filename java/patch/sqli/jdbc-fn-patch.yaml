@@ -1,0 +1,184 @@
+rules:
+- id: sqli-fn-patch-helper-param-source
+  languages:
+  - java
+  severity: WARNING
+  message: >-
+    [通用规则] 直接 HTTP 请求输入或由 HttpServletRequest 构造的请求包装器
+    方法返回值进入 JDBC Statement 或 Spring JdbcTemplate SQL 执行入口。
+    适用于跨文件请求封装，不绑定具体类名或方法名。
+  metadata:
+    cwe:
+    - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
+    category: security
+    technology:
+    - java
+    - servlets
+    - jdbc
+    - spring
+    subcategory:
+    - audit
+    confidence: MEDIUM
+    patch-for: tainted-sql-from-http-request,jdbc-sqli
+    patch-cause: generic request source wrapper and jdbc sink coverage
+  mode: taint
+  options:
+    interfile: true
+    taint_assume_safe_numbers: true
+    taint_assume_safe_booleans: true
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletRequest $REQ).$REQFUNC(...)
+      - pattern: (ServletRequest $REQ).$REQFUNC(...)
+    - metavariable-regex:
+        metavariable: $REQFUNC
+        regex: (getInputStream|getParameter|getParameterMap|getParameterValues|getParameterNames|getReader|getCookies|getHeader|getHeaderNames|getHeaders|getPart|getParts|getQueryString)
+  - patterns:
+    - pattern-inside: |
+        $TYPE[] $COOKIES = (HttpServletRequest $REQ).getCookies(...);
+        ...
+        for (javax.servlet.http.Cookie $COOKIE : $COOKIES) {
+          ...
+        }
+    - pattern: $COOKIE.getValue(...)
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: (java.sql.CallableStatement $STMT) = ...
+      - pattern: (java.sql.PreparedStatement $STMT) = ...
+      - pattern: (java.sql.Statement $STMT) = ...
+      - pattern: $VAR = $CONN.prepareStatement(...)
+      - pattern: $VAR = $CONN.prepareCall(...)
+  - patterns:
+    - pattern: $OUTPUT = $STMT.$SQLCMD(...)
+    - metavariable-regex:
+        metavariable: $SQLCMD
+        regex: ^(executeQuery|execute|executeUpdate|executeLargeUpdate|addBatch|nativeSQL)$
+  - patterns:
+    - pattern: $PATH.$SQLCMD(...)
+    - metavariable-regex:
+        metavariable: $SQLCMD
+        regex: ^(query|queryForObject|queryForList|queryForMap|execute|executeUpdate|update|batchUpdate)$
+
+- id: sqli-fn-patch-collection-enumeration-flow
+  languages:
+  - java
+  severity: WARNING
+  message: >-
+    [通用规则] 请求输入经过显式同下标 List/数组读写、Map 同键传播或
+    Iterator/Enumeration 取值后进入 SQL 执行入口。sink 必须带有
+    SQL_ELEMENT_FLOW 标签，避免复制普通 source-to-sink 告警。
+  metadata:
+    cwe:
+    - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
+    category: security
+    technology:
+    - java
+    - servlets
+    - jdbc
+    - spring
+    subcategory:
+    - audit
+    confidence: MEDIUM
+    patch-for: tainted-sql-from-http-request,jdbc-sqli
+    patch-cause: generic collection and iterator flow
+  mode: taint
+  options:
+    interfile: true
+    taint_assume_safe_numbers: true
+    taint_assume_safe_booleans: true
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: (HttpServletRequest $REQ).$REQFUNC(...)
+      - pattern: (ServletRequest $REQ).$REQFUNC(...)
+    - metavariable-regex:
+        metavariable: $REQFUNC
+        regex: (getInputStream|getParameter|getParameterMap|getParameterValues|getParameterNames|getReader|getCookies|getHeader|getHeaderNames|getHeaders|getPart|getParts|getQueryString)
+  - patterns:
+    - pattern-inside: |
+        $TYPE[] $COOKIES = (HttpServletRequest $REQ).getCookies(...);
+        ...
+        for (javax.servlet.http.Cookie $COOKIE : $COOKIES) {
+          ...
+        }
+    - pattern: $COOKIE.getValue(...)
+  - patterns:
+    - pattern-inside: |
+        $MAP = (HttpServletRequest $REQ).getParameterMap();
+        ...
+        $VALUES = $MAP.get(...);
+        ...
+        $PARAM = $VALUES[$INDEX];
+    - pattern: $PARAM
+  - patterns:
+    - pattern-inside: |
+        $WRAPPER = new $WRAPTYPE(..., (HttpServletRequest $REQ), ...);
+        ...
+    - pattern: $WRAPPER.$METHOD(...)
+  pattern-propagators:
+  # 仅对显式同下标或同键的读写建立传播边，不污染整个集合。
+  - pattern: |
+      $LIST.add($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+    label: SQL_ELEMENT_FLOW
+  - pattern: |
+      $LIST.set($INDEX, $VALUE);
+      $BAR = $LIST.get($INDEX);
+    from: $VALUE
+    to: $BAR
+    label: SQL_ELEMENT_FLOW
+  - pattern: |
+      $ARRAY[$INDEX] = $VALUE;
+      $BAR = $ARRAY[$INDEX];
+    from: $VALUE
+    to: $BAR
+    label: SQL_ELEMENT_FLOW
+  - pattern: |
+      $MAP.put($KEY, $VALUE);
+      ...
+      $BAR = $MAP.get($KEY);
+    from: $VALUE
+    to: $BAR
+    label: SQL_ELEMENT_FLOW
+  - pattern-either:
+    - pattern: $BAR = $ENUM.nextElement()
+    - pattern: (String $BAR) = $ENUM.nextElement()
+    from: $ENUM
+    to: $BAR
+    label: SQL_ELEMENT_FLOW
+  - pattern-either:
+    - pattern: $BAR = $ITERATOR.next()
+    - pattern: (String $BAR) = $ITERATOR.next()
+    from: $ITERATOR
+    to: $BAR
+    label: SQL_ELEMENT_FLOW
+  pattern-sinks:
+  - patterns:
+    - pattern-either:
+      - pattern: (java.sql.CallableStatement $STMT) = ...
+      - pattern: (java.sql.PreparedStatement $STMT) = ...
+      - pattern: (java.sql.Statement $STMT) = ...
+      - pattern: $VAR = $CONN.prepareStatement(...)
+      - pattern: $VAR = $CONN.prepareCall(...)
+    requires: SQL_ELEMENT_FLOW
+  - patterns:
+    - pattern: $OUTPUT = $STMT.$SQLCMD(...)
+    - metavariable-regex:
+        metavariable: $SQLCMD
+        regex: ^(executeQuery|execute|executeUpdate|executeLargeUpdate|addBatch|nativeSQL)$
+    requires: SQL_ELEMENT_FLOW
+  - patterns:
+    - pattern: $PATH.$SQLCMD(...)
+    - metavariable-regex:
+        metavariable: $SQLCMD
+        regex: ^(query|queryForObject|queryForList|queryForMap|execute|executeUpdate|update|batchUpdate)$
+    requires: SQL_ELEMENT_FLOW
